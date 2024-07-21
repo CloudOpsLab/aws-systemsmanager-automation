@@ -1,0 +1,41 @@
+schemaVersion: '0.3'
+description: Disable Public IPv4 on EC2.
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  InstanceId:
+    type: String
+    description: The ID of the EC2 instance
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    default: ''
+mainSteps:
+  - name: DescribeNetworkInterfaces
+    action: aws:executeAwsApi
+    nextStep: Loop
+    isEnd: false
+    inputs:
+      Service: ec2
+      Api: DescribeNetworkInterfaces
+      Filters:
+        - Name: attachment.instance-id
+          Values:
+            - '{{InstanceId}}'
+    outputs:
+      - Name: NetworkInterfaceIds
+        Selector: $.NetworkInterfaces..NetworkInterfaceId
+        Type: StringList
+  - name: Loop
+    action: aws:loop
+    isEnd: true
+    inputs:
+      Iterators: '{{ DescribeNetworkInterfaces.NetworkInterfaceIds }}'
+      Steps:
+        - name: ModifyNetworkInterfaceAttribute
+          action: aws:executeAwsApi
+          isEnd: true
+          inputs:
+            Service: ec2
+            Api: ModifyNetworkInterfaceAttribute
+            NetworkInterfaceId: '{{ Loop.CurrentIteratorValue }}'
+            AssociatePublicIpAddress: false
