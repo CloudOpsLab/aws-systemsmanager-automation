@@ -1,0 +1,33 @@
+schemaVersion: "0.3"
+description: "Delete the password to reject console access."
+assumeRole: "{{ AutomationAssumeRole }}"
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+    default: ""
+  IAMName:
+    type: String
+    description: The name of the IAM user in which to delete the password to reject console access.
+mainSteps:
+  - name: WaitForCreateLoginProfile
+    action: aws:waitForAwsResourceProperty
+    isEnd: false
+    inputs:
+      Service: "iam"
+      Api: "GetLoginProfile"
+      PropertySelector: "$.LoginProfile.UserName"
+      UserName: "{{ IAMName }}"
+      DesiredValues:
+        - "{{ IAMName }}"
+  - name: sleep
+    action: aws:sleep
+    inputs:
+      Duration: PT5S # wait for 5 seconds
+  - name: DeleteLoginProfile
+    action: aws:executeAwsApi
+    isEnd: true
+    inputs:
+      Service: "iam"
+      Api: "DeleteLoginProfile"
+      UserName: "{{ IAMName }}"

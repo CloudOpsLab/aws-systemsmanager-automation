@@ -1,0 +1,24 @@
+Content:
+schemaVersion: "0.3"
+description: "Turn on ECR image scan"
+parameters:
+  AutomationAssumeRole:
+    type: "String"
+    description: "(Optional) The ARN of the role that allows Automation to perform the actions on your behalf."
+    default: ""
+  RepositoryName:
+    type: "String"
+    allowedPattern: "(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*"
+    description: "The name of the repository in which to update the image scanning configuration setting."
+assumeRole: "{{ AutomationAssumeRole }}"
+mainSteps:
+  - description: "APIref. https://docs.aws.amazon.com/AmazonECR/latest/APIReference/API_PutImageScanningConfiguration.html"
+    name: "PutImageScanningConfiguration"
+    action: "aws:executeAwsApi"
+    isEnd: true
+    inputs:
+      Service: "ecr"
+      Api: "PutImageScanningConfiguration"
+      repositoryName: "{{ RepositoryName }}"
+      imageScanningConfiguration:
+        scanOnPush: true

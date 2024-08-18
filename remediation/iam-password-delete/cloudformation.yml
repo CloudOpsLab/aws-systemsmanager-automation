@@ -1,0 +1,139 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Delete IAM login Password SSM Automation"
+
+Resources:
+  SSMDocumentIAMDeletePassword:
+    Type: "AWS::SSM::Document"
+    Properties:
+      Content:
+        schemaVersion: "0.3"
+        description: "Delete the password to reject console access."
+        parameters:
+          AutomationAssumeRole:
+            type: String
+            description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+            default: ""
+          IAMName:
+            type: String
+            description: The name of the IAM user in which to delete the password to reject console access.
+        assumeRole: "{{ AutomationAssumeRole }}"
+        mainSteps:
+          - name: WaitForCreateLoginProfile
+            action: aws:waitForAwsResourceProperty
+            isEnd: false
+            inputs:
+              Service: "iam"
+              Api: "GetLoginProfile"
+              PropertySelector: "$.LoginProfile.UserName"
+              UserName: "{{ IAMName }}"
+              DesiredValues:
+                - "{{ IAMName }}"
+          - name: sleep
+            action: aws:sleep
+            inputs:
+              Duration: PT5S # wait for 5 seconds
+          - name: DeleteLoginProfile
+            action: aws:executeAwsApi
+            isEnd: true
+            inputs:
+              Service: "iam"
+              Api: "DeleteLoginProfile"
+              UserName: "{{ IAMName }}"
+      DocumentFormat: "YAML"
+      DocumentType: "Automation"
+      Name: "IAMDeletePassword"
+      UpdateMethod: "NewVersion"
+
+  IAMRoleSSMAutomationExecution:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ssm.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub ${AWS::AccountId}
+              ArnLike:
+                aws:SourceArn: !Sub arn:aws:ssm:*:${AWS::AccountId}:automation-execution/*
+      Policies:
+        - PolicyName: "AutomationServicePolicyDeleteIAMPassword"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "iam:DeleteLoginProfile"
+                  - "iam:GetLoginProfile"
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:user/*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole
+      Path: /
+      Description: New IAM role to allow SSM access.
+
+  IAMRoleEventBridgeInvokeAutomation:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: "EventBridgeServicePolicyInvokeAutomation"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:StartAutomationExecution
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${SSMDocumentIAMDeletePassword}:$DEFAULT"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !GetAtt IAMRoleSSMAutomationExecution.Arn
+                Condition:
+                  StringLikeIfExists:
+                    iam:PassedToService: ssm.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/PowerUserAccess
+      Path: /service-role/
+
+  EventRuleIAMCreated:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: "IAMCreated"
+      EventPattern:
+        source:
+          - "aws.iam"
+        detail-type:
+          - "AWS API Call via CloudTrail"
+        detail:
+          eventSource:
+            - "iam.amazonaws.com"
+          eventName:
+            - "CreateLoginProfile"
+      State: "ENABLED"
+      EventBusName: "default"
+      Targets:
+        - Id: "SSMDocumentIAMDeletePassword"
+          Arn: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${SSMDocumentIAMDeletePassword}:$DEFAULT"
+          RoleArn: !GetAtt "IAMRoleEventBridgeInvokeAutomation.Arn"
+          InputTransformer:
+            InputPathsMap:
+              IAMName: $.detail.requestParameters.userName
+            InputTemplate: !Sub |
+              {
+                "AutomationAssumeRole":["${IAMRoleSSMAutomationExecution.Arn}"],
+                "IAMName":[<IAMName>]
+              }
